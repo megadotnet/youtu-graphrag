@@ -1,8 +1,14 @@
+"""
+LLM API interface module.
+Handles communication with LLM providers (OpenAI, Azure OpenAI, etc.).
+"""
+
 import os
 import time
 import json
 import requests
 import re
+from typing import Optional
 
 from openai import OpenAI, AzureOpenAI
 from dotenv import load_dotenv
@@ -12,7 +18,25 @@ from utils.logger import logger
 load_dotenv()
 
 class LLMCompletionCall:
+    """
+    A class to handle interactions with LLM APIs using the OpenAI client interface.
+    Supports standard OpenAI API and Azure OpenAI.
+    """
+
     def __init__(self):
+        """
+        Initialize the LLMCompletionCall instance.
+
+        Loads configuration from environment variables:
+        - LLM_MODEL: The model name to use (default: "deepseek-chat").
+        - LLM_BASE_URL: The base URL for the API (default: "https://api.deepseek.com").
+        - LLM_API_KEY: The API key (required).
+        - OPENAI_PROVIDER: The provider type, "openai" or "azure" (default: "openai").
+        - API_VERSION: API version for Azure OpenAI (default: "2025-01-01-preview").
+
+        Raises:
+            ValueError: If LLM_API_KEY is not provided.
+        """
         self.llm_model = os.getenv("LLM_MODEL", "deepseek-chat")
         self.llm_base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
         self.llm_api_key = os.getenv("LLM_API_KEY", "")
@@ -31,13 +55,16 @@ class LLMCompletionCall:
 
     def call_api(self, content: str) -> str:
         """
-        Call API to generate text with retry mechanism.
+        Call the LLM API to generate text based on the provided content.
         
         Args:
-            content: Prompt content
+            content (str): The prompt content to send to the LLM.
             
         Returns:
-            Generated text response
+            str: The generated text response from the LLM, cleaned of markdown code fences if present.
+
+        Raises:
+            Exception: If the API call fails.
         """
             
         try:
@@ -55,6 +82,17 @@ class LLMCompletionCall:
             raise e 
 
     def _clean_llm_content(self, text: str) -> str:
+        """
+        Clean the raw content returned by the LLM.
+
+        Removes markdown code fences (```json ... ```) and extra whitespace.
+
+        Args:
+            text (str): The raw text from the LLM.
+
+        Returns:
+            str: The cleaned text.
+        """
         if not isinstance(text, str):
             return ""
         t = text.replace("\r\n", "\n").replace("\r", "\n").strip()

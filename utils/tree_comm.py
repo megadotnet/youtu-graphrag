@@ -1,8 +1,13 @@
+"""
+Community detection and hierarchical tree construction module.
+Uses FastTreeComm algorithm to cluster graph nodes and create community super-nodes.
+"""
+
 import json
 import time
 import warnings
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple, Any
 
 import networkx as nx
 import numpy as np
@@ -26,12 +31,24 @@ except ImportError:
 
 
 class FastTreeComm:
-    def __init__(self, graph, embedding_model="all-MiniLM-L6-v2", struct_weight=0.3, config=None):
+    """
+    Fast Tree Community Detection class.
+
+    This class implements an algorithm to detect communities in a knowledge graph
+    by combining structural information (adjacency) and semantic information (node embeddings).
+    It also supports generating summaries for detected communities using an LLM.
+    """
+
+    def __init__(self, graph: nx.DiGraph, embedding_model: str = "all-MiniLM-L6-v2", struct_weight: float = 0.3, config: Any = None):
         """
-        :param graph: Input graph (NetworkX DiGraph)
-        :param embedding_model: Sentence embedding model
-        :param struct_weight: Structural similarity weight (float between 0 and 1)
-        :param config: Configuration object (optional)
+        Initialize the FastTreeComm instance.
+
+        Args:
+            graph (nx.DiGraph): The input knowledge graph.
+            embedding_model (str): Name of the sentence embedding model to use.
+            struct_weight (float): Weight for structural similarity (0 to 1).
+                                   (1 - struct_weight) is used for semantic similarity.
+            config (Any, optional): Configuration object. If provided, overrides defaults.
         """
         if config is None and get_config is not None:
             try:
@@ -46,7 +63,7 @@ class FastTreeComm:
             struct_weight = struct_weight if struct_weight != 0.3 else config.tree_comm.struct_weight
         
         self.model = SentenceTransformer(embedding_model)
-        self.semantic_cache = {}
+        self.semantic_cache: Dict[str, np.ndarray] = {}
         self.struct_weight = struct_weight
         self.node_list = list(graph.nodes())
         self.node_names = {n: graph.nodes[n]["properties"]["name"] for n in graph.nodes()}
@@ -54,7 +71,7 @@ class FastTreeComm:
         self.edge_relations = {(u, v): data.get("relation", "related_to") 
                           for u, v, data in graph.edges(data=True)}
         
-        self.triple_strings_cache = {}
+        self.triple_strings_cache: Dict[str, List[str]] = {}
         self.degree_cache = {n: self.graph.degree(n) for n in self.node_list}
 
         self.adjacency_sparse = self._build_sparse_adjacency()
@@ -63,7 +80,13 @@ class FastTreeComm:
         
         self.llm_client = call_llm_api.LLMCompletionCall()
 
-    def _build_sparse_adjacency(self):
+    def _build_sparse_adjacency(self) -> sp.csr_matrix:
+        """
+        Build a sparse adjacency matrix for the graph.
+
+        Returns:
+            sp.csr_matrix: Sparse adjacency matrix.
+        """
         n = len(self.node_list)
         node_to_idx = {node: i for i, node in enumerate(self.node_list)}
         row, col = [], []
@@ -80,13 +103,22 @@ class FastTreeComm:
         return sp.csr_matrix((data, (row, col)), shape=(n, n))
 
     def _precompute_all_triples(self):
+        """Precompute and cache triple strings for all nodes."""
         for node_id in self.node_list:
             self.triple_strings_cache[node_id] = self._get_triple_strings(node_id)
         
         return
 
-    def _get_triple_strings(self, node_id):
-        """extract all neighbors for one node, enhance the structural perception with 1-hop neighbors"""
+    def _get_triple_strings(self, node_id: str) -> List[str]:
+        """
+        Extract all relationship triples for a node to enhance structural perception.
+
+        Args:
+            node_id (str): The ID of the node.
+
+        Returns:
+            List[str]: A list of strings representing the triples (e.g., "NodeA relation NodeB").
+        """
         if node_id in self.triple_strings_cache:
             return self.triple_strings_cache[node_id]
             
@@ -102,16 +134,32 @@ class FastTreeComm:
         self.triple_strings_cache[node_id] = result
         return result
 
-    def get_triple_embedding(self, node_id):
-        """leverage triple-level embedding to represent one node"""
+    def get_triple_embedding(self, node_id: str) -> np.ndarray:
+        """
+        Get the embedding for a node based on its triples (context).
+
+        Args:
+            node_id (str): The ID of the node.
+
+        Returns:
+            np.ndarray: The embedding vector.
+        """
         if node_id not in self.semantic_cache:
             triples = self.triple_strings_cache.get(node_id, [])
             text = ", ".join(triples) if triples else self.graph.nodes[node_id]["properties"]["name"]
             self.semantic_cache[node_id] = self.model.encode(text)
         return self.semantic_cache[node_id]
     
-    def get_triple_embeddings_batch(self, node_ids):
-        """Batch processing for GPU acceleration with optimized caching"""
+    def get_triple_embeddings_batch(self, node_ids: List[str]) -> np.ndarray:
+        """
+        Get embeddings for a batch of nodes, using optimized batch processing.
+
+        Args:
+            node_ids (List[str]): List of node IDs.
+
+        Returns:
+            np.ndarray: Array of embedding vectors.
+        """
         uncached_ids = [nid for nid in node_ids if nid not in self.semantic_cache]
         
         if uncached_ids:
@@ -128,8 +176,16 @@ class FastTreeComm:
                 self.semantic_cache[nid] = emb.cpu().numpy()
         return np.array([self.semantic_cache[nid] for nid in node_ids])
 
-    def _compute_jaccard_matrix_vectorized(self, level_nodes):
+    def _compute_jaccard_matrix_vectorized(self, level_nodes: List[str]) -> np.ndarray:
+        """
+        Compute the Jaccard similarity matrix for a subset of nodes based on graph structure.
 
+        Args:
+            level_nodes (List[str]): List of node IDs to compute similarity for.
+
+        Returns:
+            np.ndarray: Jaccard similarity matrix.
+        """
         node_to_idx = {node: i for i, node in enumerate(self.node_list)}
         level_indices = [node_to_idx[node] for node in level_nodes if node in node_to_idx]
 
@@ -146,7 +202,16 @@ class FastTreeComm:
 
         return jaccard_matrix
 
-    def _compute_sim_matrix(self, level_nodes):
+    def _compute_sim_matrix(self, level_nodes: List[str]) -> np.ndarray:
+        """
+        Compute the combined similarity matrix (structural + semantic).
+
+        Args:
+            level_nodes (List[str]): List of node IDs.
+
+        Returns:
+            np.ndarray: Combined similarity matrix.
+        """
         start_time = time.time()
         
         node_count = len(level_nodes)
@@ -164,7 +229,17 @@ class FastTreeComm:
                      (1 - self.struct_weight) * semantic_sim_matrix)
         return sim_matrix
 
-    def _fast_clustering(self, level_nodes, n_clusters=None):
+    def _fast_clustering(self, level_nodes: List[str], n_clusters: Optional[int] = None) -> Dict[int, List[str]]:
+        """
+        Perform fast initial clustering using K-Means on embeddings.
+
+        Args:
+            level_nodes (List[str]): List of nodes to cluster.
+            n_clusters (Optional[int]): Number of clusters to form. If None, calculated automatically.
+
+        Returns:
+            Dict[int, List[str]]: Dictionary mapping cluster IDs to lists of node IDs.
+        """
         if len(level_nodes) <= 2:
             return {0: level_nodes}
         
@@ -183,23 +258,37 @@ class FastTreeComm:
         
         return dict(clusters)
 
-    def detect_communities(self, level_nodes, max_iter=1, merge_threshold=0.5, max_total_communities=None):
+    def detect_communities(self, level_nodes: List[str], max_iter: int = 1, merge_threshold: float = 0.5, max_total_communities: Optional[int] = None) -> Dict[int, List[str]]:
+        """
+        Detect communities within the given set of nodes.
+
+        Uses hierarchical clustering refinement.
+
+        Args:
+            level_nodes (List[str]): List of nodes to process.
+            max_iter (int): Maximum iterations for refinement.
+            merge_threshold (float): Threshold for merging clusters.
+            max_total_communities (Optional[int]): Maximum number of communities to produce.
+
+        Returns:
+            Dict[int, List[str]]: Detected communities (ID -> Node List).
+        """
         if len(level_nodes) <= 1:
             return {0: level_nodes} if level_nodes else {}
 
-        # 从配置中读取 max_total_communities，如果没有配置则使用默认值
+        # Read max_total_communities from config if not provided
         if max_total_communities is None:
             if self.config and hasattr(self.config.tree_comm, 'max_total_communities'):
                 max_total_communities = self.config.tree_comm.max_total_communities
             else:
-                # 原有的默认逻辑：节点数的1/3，最少5个，最多200个
+                # Default logic: 1/3 of nodes, min 5, max 200
                 max_total_communities = min(max(5, len(level_nodes) // 3), 200)
 
         initial_clusters = self._fast_clustering(level_nodes)
         final_communities = {}
         comm_id = 0
         
-        # 按簇大小排序，优先处理大簇（确保大簇能得到细分机会）
+        # Sort clusters by size, prioritize large clusters
         sorted_clusters = sorted(initial_clusters.items(), key=lambda x: len(x[1]), reverse=True)
         processed_cluster_ids = set()
         
@@ -210,9 +299,9 @@ class FastTreeComm:
                 final_communities[comm_id] = cluster_nodes
                 comm_id += 1
             else:
-                # 检查是否还有剩余配额进行细分
+                # Check if quota remains for subdivision
                 if len(final_communities) >= max_total_communities:
-                    # 配额已满，将剩余簇直接作为社区，不再细分
+                    # Quota full, use remaining cluster as is
                     final_communities[comm_id] = cluster_nodes
                     comm_id += 1
                 else:
@@ -221,11 +310,11 @@ class FastTreeComm:
                         final_communities[comm_id] = sub_comm
                         comm_id += 1
                         
-                        # 如果社区数量已经达到上限，停止细分
+                        # Stop if limit reached
                         if len(final_communities) >= max_total_communities:
                             break
                     
-                    # 如果达到上限，将剩余未处理的簇直接添加为社区
+                    # If limit reached, add remaining clusters directly
                     if len(final_communities) >= max_total_communities:
                         for remaining_cluster_id, remaining_nodes in sorted_clusters:
                             if remaining_cluster_id not in processed_cluster_ids:
@@ -239,7 +328,18 @@ class FastTreeComm:
         logger.info(f"Generated {len(final_communities)} communities from {len(level_nodes)} nodes")
         return final_communities
 
-    def _refine_cluster(self, cluster_nodes, max_iter, merge_threshold):
+    def _refine_cluster(self, cluster_nodes: List[str], max_iter: int, merge_threshold: float) -> Dict[int, List[str]]:
+        """
+        Refine a large cluster into smaller sub-communities.
+
+        Args:
+            cluster_nodes (List[str]): Nodes in the cluster.
+            max_iter (int): Maximum iterations.
+            merge_threshold (float): Similarity threshold for merging.
+
+        Returns:
+            Dict[int, List[str]]: Refined sub-communities.
+        """
         if len(cluster_nodes) <= 3:
             return {0: cluster_nodes}
 
@@ -334,8 +434,18 @@ class FastTreeComm:
         
         return current_clusters
     
-    def _should_merge_clusters(self, cluster1_nodes, cluster2_nodes, sim_info):
+    def _should_merge_clusters(self, cluster1_nodes: List[str], cluster2_nodes: List[str], sim_info: Dict[str, Any]) -> bool:
+        """
+        Determine if two clusters should be merged.
 
+        Args:
+            cluster1_nodes (List[str]): Nodes in cluster 1.
+            cluster2_nodes (List[str]): Nodes in cluster 2.
+            sim_info (Dict[str, Any]): Similarity info.
+
+        Returns:
+            bool: True if they should merge.
+        """
         if sim_info['similarity'] < 0.5:
             return False
         
@@ -345,13 +455,30 @@ class FastTreeComm:
         
         return True
 
-    def _compute_community_center(self, community_nodes):
-        """Compute community center using the top keyword as the center node"""
+    def _compute_community_center(self, community_nodes: List[str]) -> str:
+        """
+        Compute community center using the top keyword as the center node.
+
+        Args:
+            community_nodes (List[str]): List of nodes in the community.
+
+        Returns:
+            str: Node ID of the center node.
+        """
         if len(community_nodes) == 1:
             return community_nodes[0]
         return self.extract_keywords_from_community(community_nodes)[0]
 
-    def _build_batch_prompt(self, community_batch):
+    def _build_batch_prompt(self, community_batch: List[Tuple[Any, List[str]]]) -> str:
+        """
+        Build a batch prompt for LLM community summarization.
+
+        Args:
+            community_batch (List[Tuple[Any, List[str]]]): List of (community_id, members) tuples.
+
+        Returns:
+            str: The constructed prompt.
+        """
         batch_data = []
         for comm_id, members in community_batch:
             member_names = [self.node_names[n] for n in members]
@@ -387,6 +514,15 @@ class FastTreeComm:
         return prompt
 
     def _call_llm_api_batch(self, content: str) -> List[Dict]:
+        """
+        Call the LLM API and parse the JSON response.
+
+        Args:
+            content (str): The prompt content.
+
+        Returns:
+            List[Dict]: Parsed JSON response as a list of dictionaries.
+        """
         if not self.llm_client:
             return []
         response_text = self.llm_client.call_api(content)
@@ -395,7 +531,18 @@ class FastTreeComm:
         return response_json
         
 
-    def create_super_nodes(self, comm_to_nodes: Dict[str, List[str]], level: int = 4, batch_size: int = 5):
+    def create_super_nodes(self, comm_to_nodes: Dict[str, List[str]], level: int = 4, batch_size: int = 5) -> Dict[str, List[str]]:
+        """
+        Create super-nodes representing communities in the graph.
+
+        Args:
+            comm_to_nodes (Dict[str, List[str]]): Map of community ID to node list.
+            level (int): Graph level for the new super-nodes.
+            batch_size (int): Batch size for LLM processing.
+
+        Returns:
+            Dict[str, List[str]]: Map of super-node ID to member names.
+        """
         super_nodes = {}
         communities = [(comm_id, members) for comm_id, members in comm_to_nodes.items() 
                       if len(members) >= 2]
@@ -447,6 +594,16 @@ class FastTreeComm:
         return super_nodes
 
     def extract_keywords_from_community(self, community_nodes: List[str], top_k: int = 5) -> List[str]:
+        """
+        Extract top representative keywords/nodes from a community.
+
+        Args:
+            community_nodes (List[str]): List of nodes in the community.
+            top_k (int): Number of top keywords to extract.
+
+        Returns:
+            List[str]: List of top node IDs.
+        """
         if len(community_nodes) <= top_k:
             return community_nodes
 
@@ -470,7 +627,20 @@ class FastTreeComm:
         top_nodes = sorted(community_nodes, key=lambda x: combined_scores[x], reverse=True)[:top_k]
         return top_nodes
 
-    def create_super_nodes_with_keywords(self, comm_to_nodes: Dict[str, List[str]], level: int = 4, batch_size: int = 5):
+    def create_super_nodes_with_keywords(self, comm_to_nodes: Dict[str, List[str]], level: int = 4, batch_size: int = 5) -> Tuple[Dict[str, List[str]], Dict[str, str]]:
+        """
+        Create super-nodes and also extract/create keyword nodes for them.
+
+        Args:
+            comm_to_nodes (Dict[str, List[str]]): Map of community ID to node list.
+            level (int): Level for new super nodes.
+            batch_size (int): Batch size for LLM.
+
+        Returns:
+            Tuple[Dict[str, List[str]], Dict[str, str]]:
+                - Super nodes map.
+                - Keyword mapping (keyword_node_id -> keyword_original_node_id).
+        """
         super_nodes = self.create_super_nodes(comm_to_nodes, level, batch_size)
         
         keyword_mapping = {}
@@ -506,5 +676,3 @@ class FastTreeComm:
                 logger.error(f"Error creating keywords for community {comm_id}: {e}")
         
         return super_nodes, keyword_mapping
-
-    
