@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Simple but Complete Youtu-GraphRAG Backend
-Integrates real GraphRAG functionality with a simple interface
+Simple but Complete Youtu-GraphRAG Backend.
+Integrates real GraphRAG functionality with a simple interface.
 """
 
 import os
@@ -68,18 +68,41 @@ active_connections: Dict[str, WebSocket] = {}
 config = None
 
 class ConnectionManager:
+    """
+    Manages WebSocket connections.
+    """
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str):
+        """
+        Accept a new WebSocket connection.
+
+        Args:
+            websocket (WebSocket): The WebSocket connection.
+            client_id (str): Unique identifier for the client.
+        """
         await websocket.accept()
         self.active_connections[client_id] = websocket
 
     def disconnect(self, client_id: str):
+        """
+        Disconnect a client.
+
+        Args:
+            client_id (str): Unique identifier for the client.
+        """
         if client_id in self.active_connections:
             del self.active_connections[client_id]
 
     async def send_message(self, message: dict, client_id: str):
+        """
+        Send a JSON message to a specific client.
+
+        Args:
+            message (dict): The message to send.
+            client_id (str): The recipient client ID.
+        """
         if client_id in self.active_connections:
             try:
                 await self.active_connections[client_id].send_text(json.dumps(message))

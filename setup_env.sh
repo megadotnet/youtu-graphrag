@@ -1,4 +1,9 @@
 #!/bin/bash
+#
+# Environment setup script for Youtu-GraphRAG.
+# Installs dependencies, sets up external tools (Java, antiword),
+# and prepares the environment for document parsing and model usage.
+#
 
 # Upgrade pip
 echo "📦 Upgrading pip..."

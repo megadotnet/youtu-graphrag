@@ -1,3 +1,8 @@
+"""
+Graph processing module.
+Handles loading and saving of knowledge graphs in JSON and GraphML formats.
+"""
+
 import networkx as nx
 import json
 
@@ -6,22 +11,32 @@ from utils.logger import logger
 
 def load_graph_from_json(input_path: str) -> nx.MultiDiGraph:
     """
-    Load a knowledge graph from JSON format
+    Load a knowledge graph from a JSON file.
+
+    The JSON file is expected to contain a list of relationship objects.
+    Each relationship object should define a start node, a relation type, and an end node.
     
-    Expected JSON format:
+    Expected JSON structure:
     [
         {
             "start_node": {
-                "label": "entity",
+                "label": "entity_type",
                 "properties": {"name": "Entity Name", "description": "..."}
             },
             "relation": "relation_type",
             "end_node": {
-                "label": "entity", 
+                "label": "entity_type",
                 "properties": {"name": "Entity Name", "description": "..."}
             }
-        }
+        },
+        ...
     ]
+
+    Args:
+        input_path (str): The file path to the JSON file.
+
+    Returns:
+        nx.MultiDiGraph: A NetworkX MultiDiGraph representing the knowledge graph.
     """
     graph = nx.MultiDiGraph()
     
@@ -113,22 +128,14 @@ def load_graph_from_json(input_path: str) -> nx.MultiDiGraph:
 
 def save_graph_to_json(graph: nx.MultiDiGraph, output_path: str):
     """
-    Save a knowledge graph to JSON format
+    Save a knowledge graph to a JSON file.
     
-    Output format:
-    [
-        {
-            "start_node": {
-                "label": "entity",
-                "properties": {"name": "Entity Name", "description": "..."}
-            },
-            "relation": "relation_type", 
-            "end_node": {
-                "label": "entity",
-                "properties": {"name": "Entity Name", "description": "..."}
-            }
-        }
-    ]
+    The graph is serialized into a list of relationship objects, preserving the
+    structure compatible with `load_graph_from_json`.
+
+    Args:
+        graph (nx.MultiDiGraph): The graph to save.
+        output_path (str): The file path where the JSON will be written.
     """
     output = []
     
@@ -156,7 +163,16 @@ def save_graph_to_json(graph: nx.MultiDiGraph, output_path: str):
 # Legacy function for backward compatibility
 def load_graph(input_path: str) -> nx.MultiDiGraph:
     """
-    Load graph from either JSON or GraphML format (legacy support)
+    Load a knowledge graph from a file, supporting both JSON and GraphML formats.
+
+    Args:
+        input_path (str): The path to the graph file.
+
+    Returns:
+        nx.MultiDiGraph: The loaded graph.
+
+    Raises:
+        ValueError: If the file extension is not supported (.json or .graphml).
     """
     if input_path.endswith('.json'):
         return load_graph_from_json(input_path)
@@ -168,7 +184,16 @@ def load_graph(input_path: str) -> nx.MultiDiGraph:
 
 def load_graph_from_graphml(input_path: str) -> nx.MultiDiGraph:
     """
-    Load graph from GraphML format (legacy function)
+    Load a graph from a GraphML file (legacy support).
+
+    This function handles parsing specific GraphML data keys (d0, d1, d2, d3)
+    used in older versions of the dataset to reconstruction node properties.
+
+    Args:
+        input_path (str): The path to the GraphML file.
+
+    Returns:
+        nx.MultiDiGraph: The loaded graph.
     """
     graph_data = nx.read_graphml(input_path)
     
@@ -208,7 +233,14 @@ def load_graph_from_graphml(input_path: str) -> nx.MultiDiGraph:
 
 def save_graph(graph: nx.MultiDiGraph, output_path: str):
     """
-    Save graph to either JSON or GraphML format based on file extension
+    Save a graph to a file, inferring the format from the file extension.
+
+    Args:
+        graph (nx.MultiDiGraph): The graph to save.
+        output_path (str): The output file path.
+
+    Raises:
+        ValueError: If the file extension is not supported (.json or .graphml).
     """
     if output_path.endswith('.json'):
         save_graph_to_json(graph, output_path)
@@ -220,7 +252,14 @@ def save_graph(graph: nx.MultiDiGraph, output_path: str):
 
 def save_graph_to_graphml(graph: nx.MultiDiGraph, output_path: str):
     """
-    Save graph to GraphML format (legacy function)
+    Save a graph to a GraphML file (legacy support).
+
+    Dictionaries in node or edge attributes are serialized to JSON strings
+    before saving, as GraphML does not support complex data types.
+
+    Args:
+        graph (nx.MultiDiGraph): The graph to save.
+        output_path (str): The output file path.
     """
     # Create a copy of the graph to avoid modifying the original
     graph_copy = graph.copy()

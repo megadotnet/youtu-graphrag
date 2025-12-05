@@ -1,9 +1,14 @@
+"""
+Knowledge Tree Builder (KTBuilder) module.
+Handles the construction of the hierarchical knowledge graph from text corpus.
+"""
+
 import json
 import os
 import threading
 import time
 from concurrent import futures
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import nanoid
 import networkx as nx
@@ -15,7 +20,27 @@ from utils import call_llm_api, graph_processor, tree_comm
 from utils.logger import logger
 
 class KTBuilder:
-    def __init__(self, dataset_name, schema_path=None, mode=None, config=None):
+    """
+    Main class for building knowledge trees (graphs) from text data.
+
+    It supports:
+    - Text chunking
+    - Entity and relation extraction using LLMs
+    - Hierarchical structure construction (Levels 1-4)
+    - Schema evolution (Agent mode)
+    - Community detection (Level 4)
+    """
+
+    def __init__(self, dataset_name: str, schema_path: Optional[str] = None, mode: Optional[str] = None, config: Any = None):
+        """
+        Initialize the KTBuilder.
+
+        Args:
+            dataset_name (str): The name of the dataset to process.
+            schema_path (Optional[str]): Path to the schema file. If None, uses path from config.
+            mode (Optional[str]): "agent" or "noagent" mode. If None, uses config value.
+            config (Any): Configuration object. If None, loads default.
+        """
         if config is None:
             config = get_config()
         
@@ -31,7 +56,16 @@ class KTBuilder:
         self.all_chunks = {}
         self.mode = mode or config.construction.mode
 
-    def load_schema(self, schema_path) -> Dict[str, Any]:
+    def load_schema(self, schema_path: str) -> Dict[str, Any]:
+        """
+        Load the graph schema from a JSON file.
+
+        Args:
+            schema_path (str): Path to the schema file.
+
+        Returns:
+            Dict[str, Any]: The loaded schema dictionary.
+        """
         try:
             with open(schema_path, 'r', encoding='utf-8') as f:
                 schema = json.load(f)
@@ -40,7 +74,16 @@ class KTBuilder:
             return dict()
 
 
-    def chunk_text(self, text) -> Tuple[List[str], Dict[str, str]]:
+    def chunk_text(self, text: Any) -> Tuple[List[str], Dict[str, str]]:
+        """
+        Chunk the input text based on configuration.
+
+        Args:
+            text (Any): Input text (string or dict with 'title' and 'text').
+
+        Returns:
+            Tuple[List[str], Dict[str, str]]: A tuple containing a list of chunks and a mapping of chunk IDs to chunk content.
+        """
         if self.dataset_name in self.datasets_no_chunk:
             chunks = [f"{text.get('title', '')} {text.get('text', '')}".strip() 
                      if isinstance(text, dict) else str(text)]
@@ -61,6 +104,15 @@ class KTBuilder:
         return chunks, chunk2id
 
     def _clean_text(self, text: str) -> str:
+        """
+        Clean the input text by removing unwanted characters.
+
+        Args:
+            text (str): Input text.
+
+        Returns:
+            str: Cleaned text.
+        """
         if not text:
             return "[EMPTY_TEXT]"
         
@@ -84,6 +136,10 @@ class KTBuilder:
         return cleaned if cleaned else "[EMPTY_AFTER_CLEANING]"
     
     def save_chunks_to_file(self):
+        """
+        Save all processed chunks to a text file for caching.
+        Format: id: {id} \tChunk: {chunk text}
+        """
         os.makedirs("output/chunks", exist_ok=True)
         chunk_file = f"output/chunks/{self.dataset_name}.txt"
         
@@ -111,13 +167,31 @@ class KTBuilder:
         
         logger.info(f"Chunk data saved to {chunk_file} ({len(all_data)} chunks)")
     
-    def extract_with_llm(self, prompt: str):
+    def extract_with_llm(self, prompt: str) -> str:
+        """
+        Call LLM to extract information and return formatted JSON string.
+
+        Args:
+            prompt (str): Prompt to send to LLM.
+
+        Returns:
+            str: JSON string response from LLM.
+        """
         response = self.llm_client.call_api(prompt)
         parsed_dict = json_repair.loads(response)
         parsed_json = json.dumps(parsed_dict, ensure_ascii=False)
         return parsed_json 
 
-    def token_cal(self, text: str):
+    def token_cal(self, text: str) -> int:
+        """
+        Calculate token count for text using tiktoken.
+
+        Args:
+            text (str): Input text.
+
+        Returns:
+            int: Token count.
+        """
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
     
@@ -141,7 +215,7 @@ class KTBuilder:
         
         return self.config.get_prompt_formatted("construction", prompt_type, schema=recommend_schema, chunk=chunk)
     
-    def _validate_and_parse_llm_response(self, prompt: str, llm_response: str) -> dict:
+    def _validate_and_parse_llm_response(self, prompt: str, llm_response: str) -> Optional[dict]:
         """Validate and parse LLM response, returning None if invalid."""
         if llm_response is None:
             return None
@@ -153,7 +227,7 @@ class KTBuilder:
             llm_response_str = str(llm_response) if llm_response is not None else "None"
             return None
     
-    def _find_or_create_entity(self, entity_name: str, chunk_id: int, nodes_to_add: list, entity_type: str = None) -> str:
+    def _find_or_create_entity(self, entity_name: str, chunk_id: str, nodes_to_add: list, entity_type: str = None) -> str:
         """Find existing entity or create a new one, returning the entity node ID."""
         with self.lock:
             entity_node_id = next(
@@ -183,7 +257,7 @@ class KTBuilder:
                 
         return entity_node_id
     
-    def _validate_triple_format(self, triple: list) -> tuple:
+    def _validate_triple_format(self, triple: list) -> Optional[tuple]:
         """Validate and normalize triple format, returning (subject, predicate, object) or None."""
         try:
             if len(triple) > 3:
@@ -195,7 +269,7 @@ class KTBuilder:
         except Exception as e:
             return None
     
-    def _process_attributes(self, extracted_attr: dict, chunk_id: int, entity_types: dict = None) -> tuple[list, list]:
+    def _process_attributes(self, extracted_attr: dict, chunk_id: str, entity_types: dict = None) -> tuple[list, list]:
         """Process extracted attributes and return nodes and edges to add."""
         nodes_to_add = []
         edges_to_add = []
@@ -220,7 +294,7 @@ class KTBuilder:
         
         return nodes_to_add, edges_to_add
     
-    def _process_triples(self, extracted_triples: list, chunk_id: int, entity_types: dict = None) -> tuple[list, list]:
+    def _process_triples(self, extracted_triples: list, chunk_id: str, entity_types: dict = None) -> tuple[list, list]:
         """Process extracted triples and return nodes and edges to add."""
         nodes_to_add = []
         edges_to_add = []
@@ -242,7 +316,7 @@ class KTBuilder:
         
         return nodes_to_add, edges_to_add
 
-    def process_level1_level2(self, chunk: str, id: int):
+    def process_level1_level2(self, chunk: str, id: str):
         """Process attributes (level 1) and triples (level 2) with optimized structure."""
         prompt = self._get_construction_prompt(chunk)
         llm_response = self.extract_with_llm(prompt)
@@ -270,7 +344,7 @@ class KTBuilder:
             for u, v, relation in all_edges:
                 self.graph.add_edge(u, v, relation=relation)
 
-    def _find_or_create_entity_direct(self, entity_name: str, chunk_id: int, entity_type: str = None) -> str:
+    def _find_or_create_entity_direct(self, entity_name: str, chunk_id: str, entity_type: str = None) -> str:
         """Find existing entity or create a new one directly in graph (for agent mode)."""
         entity_node_id = next(
             (
@@ -297,7 +371,7 @@ class KTBuilder:
             
         return entity_node_id
     
-    def _process_attributes_agent(self, extracted_attr: dict, chunk_id: int, entity_types: dict = None):
+    def _process_attributes_agent(self, extracted_attr: dict, chunk_id: str, entity_types: dict = None):
         """Process extracted attributes in agent mode (direct graph operations)."""
         for entity, attributes in extracted_attr.items():
             for attr in attributes:
@@ -318,7 +392,7 @@ class KTBuilder:
                 entity_node_id = self._find_or_create_entity_direct(entity, chunk_id, entity_type)
                 self.graph.add_edge(entity_node_id, attr_node_id, relation="has_attribute")
     
-    def _process_triples_agent(self, extracted_triples: list, chunk_id: int, entity_types: dict = None):
+    def _process_triples_agent(self, extracted_triples: list, chunk_id: str, entity_types: dict = None):
         """Process extracted triples in agent mode (direct graph operations)."""
         for triple in extracted_triples:
             validated_triple = self._validate_triple_format(triple)
@@ -336,7 +410,7 @@ class KTBuilder:
             
             self.graph.add_edge(subj_node_id, obj_node_id, relation=pred)
 
-    def process_level1_level2_agent(self, chunk: str, id: int):
+    def process_level1_level2_agent(self, chunk: str, id: str):
         """Process attributes (level 1) and triples (level 2) with agent mechanism for schema evolution.
         
         This method enables dynamic schema evolution by allowing the LLM to suggest new entity types,
@@ -421,7 +495,10 @@ class KTBuilder:
             logger.error(f"Failed to update schema for dataset '{self.dataset_name}': {type(e).__name__}: {e}")
 
     def process_level4(self):
-        """Process communities using Tree-Comm algorithm"""
+        """
+        Process communities using Tree-Comm algorithm.
+        Identifies communities (Level 4) and creates super-nodes.
+        """
         level2_nodes = [n for n, d in self.graph.nodes(data=True) if d['level'] == 2]
         start_comm = time.time()
         _tree_comm = tree_comm.FastTreeComm(
@@ -440,7 +517,7 @@ class KTBuilder:
         logger.info(f"Community Indexing Time: {end_comm - start_comm}s")
     
     def _connect_keywords_to_communities(self):
-        """Connect relevant keywords to communities"""
+        """Connect relevant keywords to communities based on name matching."""
         # comm_names = [self.graph.nodes[n]['properties']['name'] for n, d in self.graph.nodes(data=True) if d['level'] == 4]
         comm_nodes = [n for n, d in self.graph.nodes(data=True) if d['level'] == 4]
         kw_nodes = [n for n, d in self.graph.nodes(data=True) if d['label'] == 'keyword']
@@ -452,8 +529,13 @@ class KTBuilder:
                     if kw_name in comm_name or comm_name in kw_name:
                         self.graph.add_edge(kw, comm, relation="describes")
 
-    def process_document(self, doc: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Process a single document and return its results."""
+    def process_document(self, doc: Dict[str, Any]) -> None:
+        """
+        Process a single document and update the graph.
+
+        Args:
+            doc (Dict[str, Any]): The document object.
+        """
         try:
             if not doc:
                 raise ValueError("Document is empty or None")
@@ -483,7 +565,12 @@ class KTBuilder:
             raise Exception(error_msg) from e
 
     def process_all_documents(self, documents: List[Dict[str, Any]]) -> None:
-        """Process all documents with high concurrency and pass results to process_level4."""
+        """
+        Process all documents concurrently and trigger community detection.
+
+        Args:
+            documents (List[Dict[str, Any]]): List of documents to process.
+        """
 
         max_workers = min(self.config.construction.max_workers, (os.cpu_count() or 1) + 4)
         start_construct = time.time()
@@ -535,7 +622,7 @@ class KTBuilder:
        
 
     def triple_deduplicate(self):
-        """deduplicate triples in lv1 and lv2"""
+        """Deduplicate triples in Levels 1 and 2."""
         new_graph = nx.MultiDiGraph()
 
         for node, node_data in self.graph.nodes(data=True):
@@ -550,7 +637,12 @@ class KTBuilder:
         self.graph = new_graph
 
     def format_output(self) -> List[Dict[str, Any]]:
-        """convert graph to specified output format"""
+        """
+        Convert the graph to the specified output format (list of relationships).
+
+        Returns:
+            List[Dict[str, Any]]: List of relationship dictionaries.
+        """
         output = []
 
         for u, v, data in self.graph.edges(data=True):
@@ -573,9 +665,19 @@ class KTBuilder:
         return output
     
     def save_graphml(self, output_path: str):
+        """Save the graph in GraphML format."""
         graph_processor.save_graph(self.graph, output_path)
     
-    def build_knowledge_graph(self, corpus):
+    def build_knowledge_graph(self, corpus: str) -> List[Dict[str, Any]]:
+        """
+        Main entry point for building the knowledge graph from a corpus file.
+
+        Args:
+            corpus (str): Path to the corpus file (JSON).
+
+        Returns:
+            List[Dict[str, Any]]: The constructed graph data.
+        """
         logger.info(f"========{'Start Building':^20}========")
         logger.info(f"{'➖' * 30}")
         

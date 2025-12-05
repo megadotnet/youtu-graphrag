@@ -1,5 +1,11 @@
+"""
+Question Decomposition Module.
+Decomposes complex questions into sub-questions based on the graph schema.
+"""
+
 import json_repair
-from  utils import call_llm_api
+from typing import Dict, Any, Optional
+from utils import call_llm_api
 
 try:
     from config import get_config
@@ -7,7 +13,19 @@ except ImportError:
     get_config = None
 
 class GraphQ:
-    def __init__(self, dataset_name, config=None):
+    """
+    A class for decomposing complex questions into simpler sub-questions using an LLM.
+    Uses the graph schema to guide the decomposition process.
+    """
+
+    def __init__(self, dataset_name: str, config: Any = None):
+        """
+        Initialize the GraphQ decomposer.
+
+        Args:
+            dataset_name (str): Name of the dataset being processed.
+            config (Any, optional): Configuration object.
+        """
         if config is None and get_config is not None:
             try:
                 self.config = get_config()
@@ -19,11 +37,30 @@ class GraphQ:
         self.dataset_name = dataset_name
             
     def read_schema(self, schema_path: str) -> str:
+        """
+        Read the schema file content.
+
+        Args:
+            schema_path (str): Path to the schema file.
+
+        Returns:
+            str: Content of the schema file.
+        """
         with open(schema_path, "r") as f:
             schema = f.read()
         return schema
     
     def prompt_format(self, schema: str, question: str) -> str:
+        """
+        Generate the decomposition prompt.
+
+        Args:
+            schema (str): The graph schema string.
+            question (str): The question to decompose.
+
+        Returns:
+            str: The formatted prompt.
+        """
         if self.config:
             if self.dataset_name == "anony_chs":
                 return self.config.get_prompt_formatted("decomposition", "anony_chs", ontology=schema, question=question)
@@ -98,7 +135,22 @@ class GraphQ:
                 ]
                 """
     
-    def decompose(self, question: str, schema_path: str) -> dict:
+    def decompose(self, question: str, schema_path: str) -> Dict[str, Any]:
+        """
+        Decompose a question into sub-questions.
+
+        Args:
+            question (str): The question to decompose.
+            schema_path (str): Path to the schema file.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing the sub-questions and involved types.
+                Example:
+                {
+                    "sub_questions": [{"sub-question": "..."}],
+                    "involved_types": {"nodes": [], "relations": [], "attributes": []}
+                }
+        """
         schema = self.read_schema(schema_path)
         prompt = self.prompt_format(schema, question)
         response = self.llm_client.call_api(prompt)

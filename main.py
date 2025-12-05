@@ -1,6 +1,16 @@
 """
-- noagent: Basic retrieval and answer generation
-- agent: Question decomposition with parallel sub-question processing and Iterative Retrieval Chain of Thought with step-by-step reasoning
+Main entry point for the Youtu-GraphRAG framework.
+
+This script handles:
+- Configuration loading and environment setup.
+- Command-line argument parsing.
+- Graph construction execution.
+- Retrieval and Question Answering execution (NoAgent and Agent modes).
+- Cache management.
+
+Modes:
+- noagent: Basic retrieval and answer generation without complex reasoning.
+- agent: Question decomposition with parallel sub-question processing and Iterative Retrieval Chain of Thought (IRCoT).
 """
 import json
 import json_repair
@@ -9,7 +19,7 @@ import argparse
 import os
 import glob
 import shutil
-from typing import List
+from typing import List, Dict, Any, Tuple
 
 from models.constructor import kt_gen as constructor
 from models.retriever import agentic_decomposer as decomposer, enhanced_kt_retriever as retriever
@@ -18,7 +28,19 @@ from config import get_config, ConfigManager
 from utils.logger import logger
 
 
-def tuples_to_string(rows, sep=", ", line_sep="\n", wrap_brackets=True):
+def tuples_to_string(rows: List[tuple], sep: str = ", ", line_sep: str = "\n", wrap_brackets: bool = True) -> str:
+    """
+    Convert a list of tuples to a formatted string.
+
+    Args:
+        rows (List[tuple]): List of tuples to convert.
+        sep (str): Separator between tuple elements.
+        line_sep (str): Separator between rows.
+        wrap_brackets (bool): Whether to wrap each row in brackets.
+
+    Returns:
+        str: Formatted string representation.
+    """
     def fmt(t):
         inner = sep.join(map(str, t))
         return f"[{inner}]" if wrap_brackets else inner
@@ -27,15 +49,15 @@ def tuples_to_string(rows, sep=", ", line_sep="\n", wrap_brackets=True):
 
 def rerank_chunks_by_keywords(chunks: List[str], question: str, top_k: int) -> List[str]:
     """
-    Rerank chunks by keyword matching with the question
+    Rerank chunks based on keyword matching with the question.
     
     Args:
-        chunks: List of chunk contents
-        question: Original question
-        top_k: Number of top chunks to return
+        chunks (List[str]): List of chunk contents.
+        question (str): The original question string.
+        top_k (int): Number of top chunks to return.
         
     Returns:
-        Reranked list of chunks
+        List[str]: The reranked top_k chunks.
     """
     if len(chunks) <= top_k:
         return chunks
@@ -54,17 +76,39 @@ def rerank_chunks_by_keywords(chunks: List[str], question: str, top_k: int) -> L
 
 
 def deduplicate_triples(triples: List[str]) -> List[str]:
+    """
+    Deduplicate a list of triple strings.
 
+    Args:
+        triples (List[str]): List of triple strings.
+
+    Returns:
+        List[str]: List of unique triple strings.
+    """
     return list(set(triples))
 
 
-def merge_chunk_contents(chunk_ids, chunk_contents_dict):
+def merge_chunk_contents(chunk_ids: List[str], chunk_contents_dict: Dict[str, str]) -> List[str]:
+    """
+    Retrieve contents for a list of chunk IDs from a dictionary.
 
+    Args:
+        chunk_ids (List[str]): List of chunk IDs.
+        chunk_contents_dict (Dict[str, str]): Dictionary mapping chunk IDs to content.
+
+    Returns:
+        List[str]: List of chunk contents corresponding to the IDs.
+    """
     return [chunk_contents_dict.get(chunk_id, f"[Missing content for chunk {chunk_id}]") for chunk_id in chunk_ids]
 
 
-def parse_arguments():
-    """Parse command line arguments."""
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments.
+    """
     parser = argparse.ArgumentParser(description="Youtu-GraphRAG Framework")
     parser.add_argument(
         "--config", 
@@ -88,7 +132,13 @@ def parse_arguments():
 
 
 def setup_environment(config: ConfigManager):
-    """Set up the environment based on configuration."""
+    """
+    Set up the environment based on configuration.
+    Creates necessary output directories and logs initialization.
+
+    Args:
+        config (ConfigManager): The loaded configuration object.
+    """
     config.create_output_directories()
     
     logger.info("Youtu-GraphRAG initialized")
@@ -98,7 +148,12 @@ def setup_environment(config: ConfigManager):
 
 
 def clear_cache_files(dataset_name: str) -> None:
-    """Clear cache files for a dataset before graph construction (CLI path)."""
+    """
+    Clear cache files for a dataset before graph construction.
+
+    Args:
+        dataset_name (str): The name of the dataset.
+    """
     try:
         faiss_cache_dir = f"retriever/faiss_cache_new/{dataset_name}"
         if os.path.exists(faiss_cache_dir):
@@ -138,7 +193,13 @@ def clear_cache_files(dataset_name: str) -> None:
         logger.error(f"Error clearing cache files for {dataset_name}: {e}")
 
 
-def graph_construction(datasets):
+def graph_construction(datasets: List[str]):
+    """
+    Execute the graph construction process for a list of datasets.
+
+    Args:
+        datasets (List[str]): List of dataset names to process.
+    """
     if config.triggers.constructor_trigger:
         logger.info("Starting knowledge graph construction...")
         
@@ -166,7 +227,13 @@ def graph_construction(datasets):
     return
 
 
-def retrieval(datasets):
+def retrieval(datasets: List[str]):
+    """
+    Execute the retrieval and QA process for a list of datasets.
+
+    Args:
+        datasets (List[str]): List of dataset names to process.
+    """
     for dataset in datasets:
         dataset_config = config.get_dataset_config(dataset)
         
@@ -206,18 +273,19 @@ def retrieval(datasets):
             agent_retrieval(graphq, kt_retriever, qa_pairs, dataset_config.schema_path)
 
 
-def initial_question_decomposition(graphq, kt_retriever, question, schema_path):
+def initial_question_decomposition(graphq, kt_retriever, question: str, schema_path: str) -> Dict[str, Any]:
     """
-    Process a single question using noagent mode and return structured results.
+    Process a single question using decomposition and retrieval, returning structured results.
+    This serves as the initial step for both Agent and NoAgent modes.
     
     Args:
-        graphq: GraphQ decomposer instance
-        kt_retriever: KTRetriever instance
-        question: The question to process
-        schema_path: Path to schema file
+        graphq: GraphQ decomposer instance.
+        kt_retriever: KTRetriever instance.
+        question (str): The question to process.
+        schema_path (str): Path to the schema file.
         
     Returns:
-        dict: Contains decomposition_result, retrieval_results, and initial_answer
+        dict: Contains decomposition_result, retrieval_results, and initial_answer.
     """
     all_triples = set()
     all_chunk_ids = set()
@@ -350,7 +418,16 @@ def initial_question_decomposition(graphq, kt_retriever, question, schema_path):
     }
 
 
-def no_agent_retrieval(graphq, kt_retriever, qa_pairs, schema_path):
+def no_agent_retrieval(graphq, kt_retriever, qa_pairs: List[Dict], schema_path: str):
+    """
+    Execute NoAgent retrieval mode.
+
+    Args:
+        graphq: GraphQ decomposer instance.
+        kt_retriever: KTRetriever instance.
+        qa_pairs (List[Dict]): List of QA pairs for evaluation.
+        schema_path (str): Path to schema file.
+    """
     total_time = 0
     accuracy = 0
     total_questions = len(qa_pairs)
@@ -374,7 +451,16 @@ def no_agent_retrieval(graphq, kt_retriever, qa_pairs, schema_path):
     logger.info(f"Average time taken: {total_time/total_questions} seconds")
 
 
-def agent_retrieval(graphq, kt_retriever, qa_pairs, schema_path):
+def agent_retrieval(graphq, kt_retriever, qa_pairs: List[Dict], schema_path: str):
+    """
+    Execute Agent retrieval mode with Iterative Retrieval Chain of Thought (IRCoT).
+
+    Args:
+        graphq: GraphQ decomposer instance.
+        kt_retriever: KTRetriever instance.
+        qa_pairs (List[Dict]): List of QA pairs for evaluation.
+        schema_path (str): Path to schema file.
+    """
     total_time = 0
     accuracy = 0
     total_questions = len(qa_pairs)
