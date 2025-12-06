@@ -1,7 +1,12 @@
+"""
+Logging module for Youtu-GraphRAG.
+Provides a colored logger setup and progress reporting.
+"""
+
 import logging
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = ["logger", "setup_logger", "progress"]
 
@@ -16,8 +21,19 @@ COLORS = {
 }
 
 class ColoredFormatter(logging.Formatter):
-    """Custom formatter that colors the entire log line based on level."""
+    """
+    Custom formatter that colors the entire log line based on level.
+    """
     def format(self, record):
+        """
+        Format the log record with colors.
+
+        Args:
+            record (logging.LogRecord): The log record to format.
+
+        Returns:
+            str: The formatted and colored log string.
+        """
         formatted = super().format(record)
         color = COLORS.get(record.levelname)
         if color:
@@ -28,15 +44,15 @@ def setup_logger(name: str = "youtu-graphrag",
                 level: int = logging.INFO,
                 log_file: Optional[str] = None) -> logging.Logger:
     """
-    Setup and return a logger instance with colored output
+    Setup and return a logger instance with colored output.
     
     Args:
-        name: Logger name
-        level: Logging level (default: INFO)
-        log_file: Optional file path to save logs
+        name (str): Logger name. Default is "youtu-graphrag".
+        level (int): Logging level (e.g., logging.INFO). Default is logging.INFO.
+        log_file (Optional[str]): Optional file path to save logs.
         
     Returns:
-        logging.Logger: Configured logger instance
+        logging.Logger: Configured logger instance.
     """
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -77,12 +93,15 @@ def setup_logger(name: str = "youtu-graphrag",
 # Create default logger instance
 logger = setup_logger()
 
-def progress(stage: str, message: str, *, done: bool | None = None):
-    """Unified progress logging helper.
+def progress(stage: str, message: str, *, done: Union[bool, None] = None):
+    """
+    Unified progress logging helper.
+
     Args:
-        stage: Short stage/category name
-        message: Detail message
-        done: Optional flag mark completion (prints ✅/❌)
+        stage (str): Short stage/category name (e.g., "Indexing", "Retrieval").
+        message (str): Detailed message describing the current progress.
+        done (Union[bool, None]): Optional flag to mark completion.
+                                  True adds a checkmark (✅), False adds a cross (❌), None adds nothing.
     """
     suffix = ""
     if done is True:

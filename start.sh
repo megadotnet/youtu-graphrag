@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# Startup script for Youtu-GraphRAG Server.
+# Checks for necessary dependencies and starts the FastAPI backend.
+#
 
 echo "🌟 Starting Youtu-GraphRAG Server..."
 echo "=========================================="
