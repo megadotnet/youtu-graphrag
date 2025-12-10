@@ -1,5 +1,22 @@
+# ==========================================
+# Youtu-GraphRAG Configuration File
+# ==========================================
+# This file centralizes all configuration parameters for the framework.
+# Sections include:
+# - construction: Parameters for building the knowledge graph.
+# - datasets: Paths and settings for specific datasets.
+# - embeddings: Configuration for the embedding model.
+# - nlp: Natural Language Processing settings.
+# - output: Output directory structure.
+# - performance: Performance tuning parameters.
+# - prompts: Prompt templates for LLM interactions.
+# - retrieval: Parameters for the retrieval system (FAISS, Agent).
+# - triggers: Global execution flags.
+
 construction:
+  # Size of text chunks for processing
   chunk_size: 1000
+  # Datasets to exclude from chunking (processed as whole documents)
   datasets_no_chunk:
   - hotpot
   - 2wiki
@@ -8,16 +25,25 @@ construction:
   - annoy_chs
   - annoy_eng
   - demo
+  # Maximum number of concurrent workers for construction tasks
   max_workers: 32
+  # Construction mode: 'agent' (with schema evolution) or 'noagent' (standard)
   mode: agent  # set noagent to speed up
+  # Overlap between consecutive text chunks
   overlap: 200
+  # Tree Community Detection settings
   tree_comm:
+    # Model used for generating embeddings during community detection
     embedding_model: all-MiniLM-L6-v2
+    # Enable optimized fast clustering
     enable_fast_mode: true
+    # Weight for structural similarity (vs semantic similarity)
     struct_weight: 0.3
+    # Maximum total number of communities to detect
     max_total_communities: 100
     
 datasets:
+  # Configuration for each supported dataset
   hotpot:
     corpus_path: data/hotpotqa/hotpotqa_corpus.json
     qa_path: data/hotpotqa/hotpotqa.json
@@ -55,30 +81,44 @@ datasets:
     graph_output: output/graphs/anony_eng_new.json
 
 embeddings:
+  # Batch size for embedding generation
   batch_size: 32
+  # Device to use for embedding model ('cpu' or 'cuda')
   device: cpu
+  # Maximum sequence length for the model
   max_length: 512
+  # Name of the sentence-transformers model
   model_name: all-MiniLM-L6-v2
 
 nlp:
+  # SpaCy model for entity recognition and linguistic features
   spacy_model: en_core_web_lg
 
 
 output:
+  # Output directory structure
   base_dir: output
   chunks_dir: output/chunks
   graphs_dir: output/graphs
   logs_dir: output/logs
+  # Save detailed information about chunks
   save_chunk_details: true
+  # Save intermediate results for debugging/resuming
   save_intermediate_results: true
+
 performance:
+  # Batch size for general processing
   batch_size: 16
+  # Maximum workers for parallel tasks
   max_workers: 32
+  # Enable memory optimization strategies
   memory_optimization: true
+  # Enable parallel processing
   parallel_processing: true
+
 prompts:
   construction:
-    # NoAgent mode prompts
+    # NoAgent mode prompts (Standard extraction)
     general: "You are an expert information extractor and structured data organizer.\
       \ Your task is to analyze the provided text and extract as many valuable entities,\
       \ their attributes, and relations as possible in a structured JSON format. \
@@ -98,7 +138,7 @@ prompts:
       Stephen King\": \"person\",\n    \"Shawshank Redemption\": \"creative_work\"\
       ,\n    \"Rita Hayworth and Shawshank Redemption\": \"creative_work\",\n    \"\
       Frank Darabont\": \"person\"\n  }}\n}}\n"
-    # Agent mode prompts (with schema evolution)
+    # Agent mode prompts (with schema evolution capability)
     general_agent: "You are an expert information extractor and structured data organizer.\
       \ Your task is to analyze the provided text and extract as many valuable entities,\
       \ their attributes, and relations as possible in a structured JSON format. \
@@ -124,6 +164,7 @@ prompts:
       \ Redemption\": \"creative_work\",\n    \"Frank Darabont\": \"person\"\n  }},\n\
       \  \"new_schema_types\": {{\n      \"nodes\": [\"Movie\"],\n      \"relations\"\
       : [\"starring\"],\n      \"attributes\": [\"genre\"]\n  }}\n}}\n"
+    # Novel-specific prompts (Chinese)
     novel: "你是小说信息提取专家，请根据小说内容，参考以下schema，提取小说中的主要人物、人物关系、人物属性、人物事件等关键信息，并严格按照示例返回一个JSON格式。\n\
       \n小说内容:\n```{chunk}```\n\n参考schema:\n```{schema}```\n\n要求：\n1. 主要人物：包括主角、配角、反派等。\n\
       2. 人物关系：包括人物之间的互动、关系等。\n3. 人物属性：包括人物的职位、称号、绰号、性别、年龄、职业、性格、特长等。\n4. 主要事件：包括策略、行动、故事背景、历史事件等。\n\
@@ -131,6 +172,7 @@ prompts:
       \n示例输出，包括属性、三元组及实体类型：\n{{\n    \"attributes\": {{\n      \"PERSON#1\": [\"绰号: 智多星\"\
       , \"职位: 智囊团\", \"特长: 策划\"]\n    }},\n    \"triples\": [\n      [\"PERSON#1\"\
       , \"策划\", \"智取生辰纲\"],\n      [\"智取生辰纲\", \"发生地\", \"LOCATION#1\"]\n    ],\n    \"entity_types\": {{\n      \"PERSON#1\": \"person\",\n      \"智取生辰纲\": \"event\",\n      \"LOCATION#1\": \"location\"\n    }}\n}}\n"
+    # Novel Agent-mode prompt (Chinese)
     novel_agent: "你是小说信息提取专家，请根据小说内容，参考以下schema，提取小说中的主要人物、人物关系、人物属性、人物事件等关键信息，并严格按照示例返回一个JSON格式。\n\
       \n小说内容:\n```{chunk}```\n\n参考schema:\n```{schema}```\n\n要求：\n1. 主要人物：包括主角、配角、反派等。\n\
       2. 人物关系：包括人物之间的互动、关系等。\n3. 人物属性：包括人物的职位、称号、绰号、性别、年龄、职业、性格、特长等。\n4. 主要事件：包括策略、行动、故事背景、历史事件等。\n\
@@ -139,6 +181,7 @@ prompts:
       \n示例输出，包括属性、三元组、实体类型及新模式类型：\n{{\n    \"attributes\": {{\n      \"PERSON#1\": [\"绰号: 智多星\"\
       , \"职位: 智囊团\", \"特长: 策划\"]\n    }},\n    \"triples\": [\n      [\"PERSON#1\"\
       , \"策划\", \"智取生辰纲\"],\n      [\"智取生辰纲\", \"发生地\", \"LOCATION#1\"]\n    ],\n    \"entity_types\": {{\n      \"PERSON#1\": \"person\",\n      \"智取生辰纲\": \"event\",\n      \"LOCATION#1\": \"location\"\n    }},\n    \"new_schema_types\": {{\n      \"nodes\": [\"武器\"],\n      \"relations\": [\"使用\"],\n      \"attributes\": [\"材质\"]\n    }}\n}}\n"
+    # Novel-specific prompts (English)
     novel_eng: "You are an expert information extractor and structured data organizer.\
       \ Your task is to analyze the provided text and extract as many valuable entities,\
       \ their attributes, and relations as possible in a structured JSON format. \
@@ -156,6 +199,7 @@ prompts:
       located at\", \"LOCATION#1\"],\n    [\"PERSON#1\", \"good at\", \"playing piano\"\
       ]\n  ],\n  \"entity_types\": {{\n    \"PERSON#1\": \"person\",\n    \"LOCATION#1\"\
       : \"location\"\n  }}\n}}\n"
+    # Novel Agent-mode prompts (English)
     novel_eng_agent: "You are an expert information extractor and structured data organizer.\
       \ Your task is to analyze the provided text and extract as many valuable entities,\
       \ their attributes, and relations as possible in a structured JSON format. \
@@ -208,6 +252,7 @@ prompts:
       \   原始问题：\\\"智取生辰纲事件中，PERSON#1是谁\\\"\n   输出：\n   {{\n       \\\"sub_questions\\\": [\n           {{\\\"sub-question\\\": \\\"\
       智取生辰纲事件中，PERSON#1是谁？\\\"}}\n       ],\n       \\\"involved_types\\\": {{\n           \\\"nodes\\\": [\\\"person\\\", \\\"event\\\"],\n           \\\"relations\\\": [\\\"参与\\\"],\n           \\\"attributes\\\": [\\\"name\\\"]\n       }}\n   }}\n"
   retrieval:
+    # General retrieval prompt
     general: 'You are an expert knowledge assistant. Your task is to answer the question
       based on the provided knowledge context.
 
@@ -235,6 +280,7 @@ prompts:
       Answer (be specific and direct):
 
       '
+    # Iterative Retrieval Chain of Thought (IRCoT) prompt
     ircot: 'You are an expert knowledge assistant using iterative retrieval with chain-of-thought
       reasoning.
 
@@ -272,6 +318,7 @@ prompts:
       Your reasoning:
 
       '
+    # Novel-specific retrieval prompt (Chinese)
     novel: '你是小说知识助手，你的任务是根据提供的小说知识库回答问题。
 
       1. 如果知识库中的信息不足以回答问题，请根据你的推理和知识回答。
@@ -289,6 +336,7 @@ prompts:
       答案（简洁明了）：
 
       '
+    # Novel-specific retrieval prompt (English)
     novel_eng: "You are a novel knowledge assistant. Your task is to answer the question\
       \ based on the provided novel knowledge context.\n1. If the knowledge is insufficient,\
       \ answer the question based on your own knowledge.\n2. Be precise and concise\
@@ -296,25 +344,34 @@ prompts:
       \ name\n4. For temporal questions, provide the specific date, year, or time\
       \ period\n\nQuestion: {question}\n\nKnowledge Context:\n{context}   \n\nAnswer\
       \ (be specific and direct):\n"
+
 retrieval:
+  # Agent mode settings
   agent:
     enable_ircot: true
     enable_parallel_subquestions: true
     max_steps: 5
+  # Directory for caching retrieval indices
   cache_dir: retriever/faiss_cache_new
   enable_caching: true
   enable_high_recall: true
   enable_query_enhancement: true
   enable_reranking: true
+  # FAISS specific settings
   faiss:
     device: cpu
     max_workers: 4
     search_k: 50
+  # Number of retrieval paths (1 for simple, 2 for dual-path)
   recall_paths: 2
   similarity_threshold: 0.3
   top_k: 20
   top_k_filter: 20
+
 triggers:
+  # Enable knowledge graph construction
   constructor_trigger: true
+  # Operation mode: 'agent' or 'noagent'
   mode: agent  # set noagent to speed up
+  # Enable information retrieval
   retrieve_trigger: true
