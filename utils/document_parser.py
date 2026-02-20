@@ -1,12 +1,13 @@
 """
 Document Parser Utility
-Supports parsing PDF, DOCX, DOC files using MinerU and python-docx
+Supports parsing PDF, DOCX, DOC files using MinerU, PyMuPDF, python-docx, and other tools.
 """
 
 import os
 import tempfile
 from typing import Optional, Dict
 from pathlib import Path
+import subprocess
 
 from utils.logger import logger
 
@@ -32,7 +33,6 @@ except ImportError:
     logger.warning("python-docx not available")
 
 try:
-    import subprocess
     # Check for system-level antiword (prefer /usr/local/bin over pip package)
     antiword_check = subprocess.run(['which', '/usr/local/bin/antiword'], 
                                     capture_output=True)
@@ -72,22 +72,29 @@ except ImportError:
 
 
 class DocumentParser:
-    """Parse various document formats to extract text content"""
+    """
+    Parse various document formats to extract text content.
+    Supported formats: PDF, DOCX, DOC, RTF.
+    """
     
     def __init__(self):
+        """
+        Initialize the DocumentParser.
+        Creates a temporary directory for processing files.
+        """
         self.temp_dir = tempfile.mkdtemp(prefix="youtu_graphrag_")
         logger.info(f"DocumentParser initialized with temp dir: {self.temp_dir}")
     
     def parse_file(self, file_path: str, file_type: str) -> Optional[str]:
         """
-        Parse a document file and extract text content
+        Parse a document file and extract text content.
         
         Args:
-            file_path: Path to the document file
-            file_type: File extension (.pdf, .docx, .doc)
+            file_path (str): Path to the document file.
+            file_type (str): File extension (e.g., .pdf, .docx, .doc).
             
         Returns:
-            Extracted text content or None if parsing fails
+            Optional[str]: Extracted text content or None if parsing fails.
         """
         file_type = file_type.lower()
         
@@ -105,13 +112,13 @@ class DocumentParser:
     
     def _parse_pdf(self, pdf_path: str) -> Optional[str]:
         """
-        Parse PDF using MinerU
+        Parse PDF using MinerU (primary), PyMuPDF (fallback), or PyPDF (last resort).
         
         Args:
-            pdf_path: Path to PDF file
+            pdf_path (str): Path to PDF file.
             
         Returns:
-            Extracted text content
+            Optional[str]: Extracted text content.
         """
         if not MINERU_AVAILABLE:
             logger.error("MinerU is not installed. Cannot parse PDF files.")
@@ -201,13 +208,13 @@ class DocumentParser:
     
     def _parse_docx(self, docx_path: str) -> Optional[str]:
         """
-        Parse DOCX/DOC using available methods
+        Parse DOCX/DOC using available methods (python-docx, antiword, tika, LibreOffice).
         
         Args:
-            docx_path: Path to DOCX/DOC file
+            docx_path (str): Path to DOCX/DOC file.
             
         Returns:
-            Extracted text content
+            Optional[str]: Extracted text content.
         """
         file_ext = os.path.splitext(docx_path)[1].lower()
         
@@ -266,7 +273,6 @@ class DocumentParser:
         file_type_hint = ""
         is_corrupted = False
         try:
-            import subprocess
             file_info = subprocess.run(['file', docx_path], capture_output=True, text=True)
             if file_info.returncode == 0:
                 info_lower = file_info.stdout.lower()
@@ -297,7 +303,15 @@ class DocumentParser:
         return None
     
     def _parse_with_python_docx(self, docx_path: str) -> Optional[str]:
-        """Parse using python-docx library"""
+        """
+        Parse using python-docx library.
+
+        Args:
+            docx_path (str): Path to file.
+
+        Returns:
+            Optional[str]: Extracted text.
+        """
         if not DOCX_AVAILABLE:
             return None
         
@@ -330,7 +344,15 @@ class DocumentParser:
             return None
     
     def _parse_with_textract(self, doc_path: str) -> Optional[str]:
-        """Parse using textract library"""
+        """
+        Parse using textract library.
+
+        Args:
+            doc_path (str): Path to file.
+
+        Returns:
+            Optional[str]: Extracted text.
+        """
         if not TEXTRACT_AVAILABLE:
             return None
         
@@ -344,13 +366,13 @@ class DocumentParser:
     
     def _parse_with_tika(self, doc_path: str) -> Optional[str]:
         """
-        Parse using Apache Tika (supports WPS, legacy Word, and many other formats)
+        Parse using Apache Tika (supports WPS, legacy Word, and many other formats).
         
         Args:
-            doc_path: Path to the document file
+            doc_path: Path to the document file.
             
         Returns:
-            Extracted text content
+            Optional[str]: Extracted text content.
         """
         if not TIKA_AVAILABLE:
             return None
@@ -371,7 +393,15 @@ class DocumentParser:
             return None
     
     def _parse_with_antiword(self, doc_path: str) -> Optional[str]:
-        """Parse using antiword command-line tool"""
+        """
+        Parse using antiword command-line tool.
+
+        Args:
+            doc_path (str): Path to file.
+
+        Returns:
+            Optional[str]: Extracted text.
+        """
         if not ANTIWORD_AVAILABLE:
             return None
         
@@ -389,7 +419,15 @@ class DocumentParser:
         return None
     
     def _parse_doc_with_libreoffice(self, doc_path: str) -> Optional[str]:
-        """Convert .doc to .txt using LibreOffice and read the result"""
+        """
+        Convert .doc to .txt using LibreOffice and read the result.
+
+        Args:
+            doc_path (str): Path to file.
+
+        Returns:
+            Optional[str]: Extracted text.
+        """
         try:
             # Check if libreoffice is available
             lo_check = subprocess.run(
@@ -469,13 +507,13 @@ class DocumentParser:
     
     def _is_rtf_file(self, file_path: str) -> bool:
         """
-        Check if a file is actually RTF format (regardless of extension)
+        Check if a file is actually RTF format (regardless of extension).
         
         Args:
-            file_path: Path to the file to check
+            file_path (str): Path to the file to check.
             
         Returns:
-            True if file is RTF format
+            bool: True if file is RTF format.
         """
         try:
             with open(file_path, 'rb') as f:
@@ -488,13 +526,13 @@ class DocumentParser:
     
     def _parse_rtf(self, rtf_path: str) -> Optional[str]:
         """
-        Parse RTF file and extract text content
+        Parse RTF file and extract text content.
         
         Args:
-            rtf_path: Path to RTF file
+            rtf_path (str): Path to RTF file.
             
         Returns:
-            Extracted text content
+            Optional[str]: Extracted text content.
         """
         # Method 1: Try striprtf library if available
         if STRIPRTF_AVAILABLE:
@@ -566,7 +604,7 @@ class DocumentParser:
         return None
     
     def cleanup(self):
-        """Clean up temporary files"""
+        """Clean up temporary files and directories."""
         try:
             import shutil
             if os.path.exists(self.temp_dir):
@@ -580,7 +618,12 @@ class DocumentParser:
 _parser_instance = None
 
 def get_parser() -> DocumentParser:
-    """Get or create global parser instance"""
+    """
+    Get or create global parser instance.
+
+    Returns:
+        DocumentParser: The global parser instance.
+    """
     global _parser_instance
     if _parser_instance is None:
         _parser_instance = DocumentParser()

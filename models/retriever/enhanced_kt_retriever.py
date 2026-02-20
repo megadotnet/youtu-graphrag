@@ -1,9 +1,14 @@
+"""
+Enhanced Knowledge Tree Retriever Module.
+Provides advanced retrieval capabilities over the knowledge graph using embeddings, FAISS, and LLM.
+"""
+
 import os
 import pickle
 import threading
 import time
 from functools import lru_cache
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Any
 
 import faiss
 import numpy as np
@@ -24,19 +29,41 @@ except ImportError:
     get_config = None
 
 class KTRetriever:
+    """
+    Knowledge Tree Retriever class.
+
+    Orchestrates the retrieval process, combining vector similarity search (via FAISS),
+    keyword matching, and graph traversal to find relevant information for a given question.
+    """
+
     def __init__(
         self,
         dataset: str,
-        json_path: str = None,
+        json_path: Optional[str] = None,
         qa_encoder: Optional[SentenceTransformer] = None,
         device: str = "cuda",
         cache_dir: str = "retriever/faiss_cache_new",
         top_k: int = 5,
         recall_paths: int = 2,
-        schema_path: str = None,
+        schema_path: Optional[str] = None,
         mode: str = "agent",
-        config=None
+        config: Any = None
     ):
+        """
+        Initialize the KTRetriever.
+
+        Args:
+            dataset (str): The dataset name.
+            json_path (str, optional): Path to the graph JSON file.
+            qa_encoder (SentenceTransformer, optional): Encoder model for QA.
+            device (str): Device to use ("cuda" or "cpu").
+            cache_dir (str): Directory for caching indices.
+            top_k (int): Number of top results to retrieve.
+            recall_paths (int): Number of retrieval paths to use (1 or 2).
+            schema_path (str, optional): Path to the schema file.
+            mode (str): Retrieval mode ("agent" or "noagent").
+            config (Any, optional): Configuration object.
+        """
 
         if config is None and get_config is not None:
             try:
@@ -1140,7 +1167,7 @@ class KTRetriever:
 
     def _triple_only_retrieval(self, question_embed: torch.Tensor) -> Dict:
         """
-        Path 2: Triple-only retrieval to get top 10 related triples from FAISS.
+        Path 2: Triple-only retrieval to get top related triples from FAISS.
         
         Args:
             question_embed: Encoded question tensor
@@ -1679,7 +1706,16 @@ class KTRetriever:
             }
 
     def generate_prompt(self, question: str, context: str) -> str:
+        """
+        Generate a prompt for the LLM to answer the question based on context.
         
+        Args:
+            question: The user's question.
+            context: Retrieved context (triples and chunks).
+
+        Returns:
+            Formatted prompt string.
+        """
         if self.config:
             if self.dataset == 'novel':
                 return self.config.get_prompt_formatted("retrieval", "novel_chs", question=question, context=context)
@@ -1735,6 +1771,15 @@ class KTRetriever:
 
     
     def generate_answer(self, prompt: str) -> str:
+        """
+        Generate an answer using the LLM.
+
+        Args:
+            prompt: The full prompt including context and question.
+
+        Returns:
+            The LLM's answer.
+        """
         answer = self.llm_client.call_api(prompt)
         logger.info("Retrieved context:")
         logger.info(prompt)
@@ -1889,6 +1934,16 @@ class KTRetriever:
             return 0.0
 
     def _batch_calculate_entity_similarities(self, query_embed: torch.Tensor, nodes: List[str]) -> Dict[str, float]:
+        """
+        Calculate similarities for a batch of nodes against the query embedding.
+
+        Args:
+            query_embed: Query embedding tensor.
+            nodes: List of node IDs.
+
+        Returns:
+            Dictionary of {node_id: similarity_score}.
+        """
         similarities = {}
         node_embeddings = []
         valid_nodes = []
@@ -2596,6 +2651,16 @@ class KTRetriever:
             return False
 
     def _chunk_embedding_retrieval(self, question_embed: torch.Tensor, top_k: int = 20) -> Dict:
+        """
+        Directly retrieve chunks based on embedding similarity with the question.
+
+        Args:
+            question_embed: Query embedding tensor.
+            top_k: Number of chunks to retrieve.
+
+        Returns:
+            Dict with chunk_ids, scores, and chunk_contents.
+        """
         try:
             if not self.chunk_embeddings_precomputed or self.chunk_faiss_index is None:
                 logger.info("Warning: Chunk embeddings not precomputed, skipping chunk retrieval")
@@ -2639,15 +2704,15 @@ class KTRetriever:
 
     def _rerank_chunks_by_relevance(self, chunk_results: Dict, question_embed: torch.Tensor, top_k: int = 10) -> Dict:
         """
-        Rerank chunks by relevance to the question using semantic similarity
+        Rerank chunks by relevance to the question using semantic similarity.
         
         Args:
-            chunk_results: Dictionary containing chunk_ids, scores, and chunk_contents
-            question_embed: Query embedding tensor
-            top_k: Number of top chunks to return
+            chunk_results: Dictionary containing chunk_ids, scores, and chunk_contents.
+            question_embed: Query embedding tensor.
+            top_k: Number of top chunks to return.
             
         Returns:
-            Reranked chunk results with updated scores
+            Reranked chunk results with updated scores.
         """
         try:
             chunk_ids = chunk_results.get('chunk_ids', [])

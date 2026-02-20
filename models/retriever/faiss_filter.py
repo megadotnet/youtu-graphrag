@@ -1,9 +1,15 @@
+"""
+Dual FAISS Retrieval Module.
+Implements a dual-path retrieval strategy combining triple-based and community-based retrieval.
+Uses FAISS for efficient similarity search.
+"""
+
 import json
 import os
 import time
 from collections import defaultdict
 from itertools import combinations
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional, Any
 
 import faiss
 import networkx as nx
@@ -15,11 +21,22 @@ from sentence_transformers import SentenceTransformer
 from utils.logger import logger
 
 class DualFAISSRetriever:
-    def __init__(self, dataset, graph: nx.MultiDiGraph, model_name: str = "all-MiniLM-L6-v2", cache_dir: str = "retriever/faiss_cache_new", device: str = None):
+    """
+    Retrieves information from the knowledge graph using a dual-path approach:
+    1. Triple-based retrieval: Finds relevant triples and their neighbors.
+    2. Community-based retrieval: Finds relevant communities and their member nodes.
+    """
+
+    def __init__(self, dataset: str, graph: nx.MultiDiGraph, model_name: str = "all-MiniLM-L6-v2", cache_dir: str = "retriever/faiss_cache_new", device: Optional[str] = None):
         """
-        :param graph: nx graph
-        :param model_name: embedding model
-        :param cache_dir: cache directory for FAISS indices
+        Initialize the DualFAISSRetriever.
+
+        Args:
+            dataset (str): Name of the dataset.
+            graph (nx.MultiDiGraph): The knowledge graph.
+            model_name (str): Name of the sentence embedding model.
+            cache_dir (str): Directory for storing FAISS indices.
+            device (Optional[str]): Device to use ("cpu", "cuda"). If None, auto-detects.
         """
         self.graph = graph
         self.model = SentenceTransformer(model_name)
@@ -33,6 +50,8 @@ class DualFAISSRetriever:
         
         self.triple_index = None
         self.comm_index = None
+        self.node_index = None
+        self.relation_index = None
         
         if device is not None:
             if device == "cuda" and not torch.cuda.is_available():
@@ -62,7 +81,7 @@ class DualFAISSRetriever:
         self.index_loaded = False     
         self.gpu_resources = None     
         
-        self.node_embedding_cache = {}  # 缓存已编码的节点嵌入
+        self.node_embedding_cache = {}  # Cache for encoded node embeddings
         
         # Get model output dimension
         self.model_dim = self.model.get_sentence_embedding_dimension()
@@ -98,6 +117,7 @@ class DualFAISSRetriever:
         
         
     def _preload_faiss_indices(self):
+        """Preload FAISS indices to GPU if available."""
         if self.index_loaded:
             return
         
@@ -140,7 +160,19 @@ class DualFAISSRetriever:
         self.index_loaded = True
         logger.info("FAISS indices preloaded successfully")
 
-    def _cached_faiss_search(self, index, query_embed, top_k: int, cache_key: str):
+    def _cached_faiss_search(self, index: faiss.Index, query_embed: torch.Tensor, top_k: int, cache_key: str) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Perform a cached FAISS search.
+
+        Args:
+            index (faiss.Index): The FAISS index.
+            query_embed (torch.Tensor): Query embedding tensor.
+            top_k (int): Number of nearest neighbors.
+            cache_key (str): Unique cache key.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Distances and indices.
+        """
         if cache_key in self.faiss_search_cache:
             return self.faiss_search_cache[cache_key]
         
@@ -159,15 +191,23 @@ class DualFAISSRetriever:
         
         return result
 
-    def dual_path_retrieval(self, query_emb: str, top_k: int = 10) -> Dict:
+    def dual_path_retrieval(self, query_emb: Any, top_k: int = 10) -> Dict[str, Any]:
         """
-        Complete dual-path retrieval process
-        :return: {
-            "triple_nodes": entities and their neighbors found through triples,
-            "comm_nodes": nodes found through communities,
-            "scores": node relevance scores,
-            "scored_triples": scored triples from triple retrieval
-        }
+        Complete dual-path retrieval process.
+
+        Combines results from triple-based and community-based retrieval.
+
+        Args:
+            query_emb (Any): Query embedding (Tensor or array).
+            top_k (int): Number of top results to retrieve.
+
+        Returns:
+            Dict[str, Any]: {
+                "triple_nodes": list of nodes found via triples,
+                "comm_nodes": list of nodes found via communities,
+                "scores": dict of node scores,
+                "scored_triples": list of scored triples
+            }
         """
         
         start_time = time.time()
@@ -256,10 +296,16 @@ class DualFAISSRetriever:
                 
         return unique_triples
 
-    def retrieve_via_triples(self, query_embed, top_k: int = 5) -> List[Tuple[str, str, str, float]]:
+    def retrieve_via_triples(self, query_embed: Any, top_k: int = 5) -> List[Tuple[str, str, str, float]]:
         """
-        Path 1: Retrieve triples and their 3-hop neighbors through triples.
-        Returns scored triples that have relevance scores above threshold.
+        Path 1: Retrieve triples and their 3-hop neighbors through triples index.
+
+        Args:
+            query_embed (Any): Query embedding.
+            top_k (int): Number of top results.
+
+        Returns:
+            List[Tuple[str, str, str, float]]: List of scored triples.
         """
         if not self.triple_index:
             raise ValueError("Please build triple index first!")
@@ -290,10 +336,16 @@ class DualFAISSRetriever:
         logger.info(f"_calculate_triple_relevance_scores returned {len(scored_triples)} scored triples")
         return scored_triples
 
-    def retrieve_via_communities(self, query_embed, top_k: int = 3) -> List[str]:
+    def retrieve_via_communities(self, query_embed: Any, top_k: int = 3) -> List[str]:
         """
-        Path 2: Retrieve nodes through communities.
-        Returns only nodes that have a valid, cached embedding.
+        Path 2: Retrieve nodes through communities index.
+
+        Args:
+            query_embed (Any): Query embedding.
+            top_k (int): Number of top communities to retrieve.
+
+        Returns:
+            List[str]: List of unique node IDs found in retrieved communities.
         """
         if not self.comm_index:
             raise ValueError("Please build community index first!")
@@ -337,7 +389,13 @@ class DualFAISSRetriever:
 
     def _get_3hop_neighbors(self, center: str) -> Set[str]:
         """
-        Optimized 3-hop neighbor search using BFS with caching
+        Optimized 3-hop neighbor search using BFS with caching.
+
+        Args:
+            center (str): Center node ID.
+
+        Returns:
+            Set[str]: Set of neighbor node IDs.
         """
         # Check if center node exists in both embedding map and graph
         if center not in self.node_id_to_embedding:
@@ -401,7 +459,12 @@ class DualFAISSRetriever:
     def _get_community_nodes(self, community: str) -> List[str]:
         """
         Get all nodes that belong to a community.
-        Communities are nodes with label 'community' and have members property.
+
+        Args:
+            community (str): Community node ID.
+
+        Returns:
+            List[str]: List of member node IDs.
         """
         if community not in self.graph.nodes:
             return []
@@ -429,7 +492,8 @@ class DualFAISSRetriever:
             return member_ids
         return []
 
-    def _calculate_node_scores(self, query_embed, nodes: List[str]) -> Dict[str, float]:
+    def _calculate_node_scores(self, query_embed: torch.Tensor, nodes: List[str]) -> Dict[str, float]:
+        """Calculate relevance scores for nodes against the query."""
         scores = {}
         
         if not nodes:
@@ -485,7 +549,17 @@ class DualFAISSRetriever:
         
         return scores
 
-    def _calculate_node_scores_optimized(self, query_embed, nodes: List[str]) -> Dict[str, float]:
+    def _calculate_node_scores_optimized(self, query_embed: Any, nodes: List[str]) -> Dict[str, float]:
+        """
+        Optimized calculation of node scores.
+
+        Args:
+            query_embed (Any): Query embedding.
+            nodes (List[str]): List of node IDs.
+
+        Returns:
+            Dict[str, float]: Node scores mapping.
+        """
 
         if not nodes:
             return {}
@@ -542,15 +616,15 @@ class DualFAISSRetriever:
         return scores
 
     def clear_embedding_cache(self, max_cache_size: int = 10000):
-
+        """Clean up embedding cache if it exceeds max size."""
         if len(self.node_embedding_cache) > max_cache_size:
             items_to_remove = len(self.node_embedding_cache) - max_cache_size
             oldest_keys = list(self.node_embedding_cache.keys())[:items_to_remove]
             for key in oldest_keys:
                 del self.node_embedding_cache[key]
 
-    def save_embedding_cache(self):
-        """Save embedding cache to disk using numpy format to avoid pickle issues"""
+    def save_embedding_cache(self) -> bool:
+        """Save embedding cache to disk using numpy/torch format."""
         cache_path = f"{self.cache_dir}/{self.dataset}/node_embedding_cache.pt"
         try:
             if not self.node_embedding_cache:
@@ -599,8 +673,8 @@ class DualFAISSRetriever:
         except Exception as e:
             return False
 
-    def load_embedding_cache(self):
-        """从磁盘加载嵌入缓存"""
+    def load_embedding_cache(self) -> bool:
+        """Load embedding cache from disk."""
         cache_path = f"{self.cache_dir}/{self.dataset}/node_embedding_cache.pt"
         if os.path.exists(cache_path):
             try:
@@ -609,7 +683,7 @@ class DualFAISSRetriever:
                     logger.warning(f"Warning: Cache file too small ({file_size} bytes), likely empty or corrupted")
                     return False
                 
-                # 兼容PyTorch 2.6+的weights_only参数
+                # Compatibility with PyTorch 2.6+ weights_only parameter
                 try:
                     cpu_cache = torch.load(cache_path, map_location='cpu', weights_only=False)
                 except TypeError:
@@ -636,13 +710,13 @@ class DualFAISSRetriever:
                 for node, embed in cpu_cache.items():
                     if embed is not None:
                         try:
-                            # 安全地移动到目标设备，兼容CPU环境
+                            # Safely move to target device, compatible with CPU
                             if isinstance(embed, np.ndarray):
                                 embed_tensor = torch.from_numpy(embed).float()
                             else:
                                 embed_tensor = embed.cpu() if hasattr(embed, 'cpu') else embed
                             
-                            # 只在CUDA可用时移动到CUDA设备
+                            # Only move to CUDA if available
                             if self.device.type == "cuda" and torch.cuda.is_available():
                                 embed_tensor = embed_tensor.to(self.device)
                             else:
@@ -882,7 +956,7 @@ class DualFAISSRetriever:
         self._preload_faiss_indices()
 
     def _save_dim_transform(self):
-        """Save dimension transform state to disk"""
+        """Save dimension transform state to disk."""
         dim_transform_path = f"{self.cache_dir}/{self.dataset}/dim_transform.pt"
         try:
             save_data = {
@@ -899,8 +973,8 @@ class DualFAISSRetriever:
         except Exception as e:
             logger.error(f"Error saving dimension transform: {e}")
 
-    def _load_dim_transform(self):
-        """Load dimension transform state from disk"""
+    def _load_dim_transform(self) -> bool:
+        """Load dimension transform state from disk."""
         dim_transform_path = f"{self.cache_dir}/{self.dataset}/dim_transform.pt"
         if not os.path.exists(dim_transform_path):
             return False
@@ -948,7 +1022,7 @@ class DualFAISSRetriever:
         return False
 
     def _build_node_index(self):
-        """Build FAISS index for all nodes and cache embeddings"""
+        """Build FAISS index for all nodes and cache embeddings."""
         nodes = list(self.graph.nodes())
         texts = [self._get_node_text(n) for n in nodes]
         embeddings = self.model.encode(texts, convert_to_tensor=True)
@@ -973,7 +1047,7 @@ class DualFAISSRetriever:
         self.node_index = index
         
     def _build_relation_index(self):
-        """Build FAISS index for all relations and cache embeddings"""
+        """Build FAISS index for all relations and cache embeddings."""
         relations = sorted(list({
             data['relation'] for _, _, data in self.graph.edges(data=True) if 'relation' in data
         }))
@@ -1000,7 +1074,7 @@ class DualFAISSRetriever:
         self.relation_index = index
 
     def _build_triple_index(self):
-        """Build FAISS Triple Index"""
+        """Build FAISS Triple Index."""
         triples = []
         for u, v, data in self.graph.edges(data=True):
             if 'relation' in data:
@@ -1022,7 +1096,7 @@ class DualFAISSRetriever:
         self.triple_map = {str(i): n for i, n in enumerate(triples)}
 
     def _build_community_index(self):
-        """Build FAISS Community Index"""
+        """Build FAISS Community Index."""
         communities = {
             n for n, d in self.graph.nodes(data=True) 
             if d.get('label') == 'community'
@@ -1058,6 +1132,7 @@ class DualFAISSRetriever:
         self.comm_map = {str(i): n for i, n in enumerate(valid_communities)}
 
     def _load_indices(self):
+        """Load all indices from disk cache."""
         logger.info("Starting _load_indices...")
         triple_path = f"{self.cache_dir}/{self.dataset}/triple.index"
         comm_path = f"{self.cache_dir}/{self.dataset}/comm.index"
@@ -1097,7 +1172,7 @@ class DualFAISSRetriever:
 
         if os.path.exists(node_embed_path):
             try:
-                # 兼容PyTorch 2.6+的weights_only参数
+                # Compatibility with PyTorch 2.6+ weights_only parameter
                 try:
                     self.node_embeddings = torch.load(node_embed_path, weights_only=False)
                 except TypeError:
@@ -1107,7 +1182,7 @@ class DualFAISSRetriever:
                 
         if os.path.exists(relation_embed_path):
             try:
-                # 兼容PyTorch 2.6+的weights_only参数
+                # Compatibility with PyTorch 2.6+ weights_only parameter
                 try:
                     self.relation_embeddings = torch.load(relation_embed_path, weights_only=False)
                 except TypeError:
@@ -1140,7 +1215,7 @@ class DualFAISSRetriever:
         self._verify_data_consistency()
 
     def _verify_data_consistency(self):
-        """Verify that graph nodes and embedding maps are consistent"""
+        """Verify that graph nodes and embedding maps are consistent."""
         logger.debug("Verifying data consistency...")
         
         graph_nodes = set(self.graph.nodes())
@@ -1161,6 +1236,15 @@ class DualFAISSRetriever:
             logger.info(f"✗ Data inconsistency detected: {len(missing_in_embeddings)} missing, {len(extra_in_embeddings)} extra")
 
     def _get_node_text(self, node: str) -> str:
+        """
+        Get string representation of a node for embedding.
+
+        Args:
+            node (str): Node ID.
+
+        Returns:
+            str: Comma-separated name and description.
+        """
         data = self.graph.nodes[node]
         if 'properties' in data and isinstance(data['properties'], dict):
             name = data['properties'].get('name') or 'none'
@@ -1187,7 +1271,13 @@ class DualFAISSRetriever:
 
     def _subgraph_to_text(self, subgraph: nx.MultiDiGraph) -> str:
         """
-        Convert subgraph to readable text format
+        Convert subgraph to readable text format.
+
+        Args:
+            subgraph (nx.MultiDiGraph): The subgraph.
+
+        Returns:
+            str: Text representation of the subgraph.
         """
         text_parts = []
         
@@ -1330,7 +1420,7 @@ class DualFAISSRetriever:
         return "\n".join(text_parts)
 
     def transform_vector(self, vector: torch.Tensor) -> torch.Tensor:
-        """Transform vector dimensions if needed"""
+        """Transform vector dimensions if needed."""
         if self.dim_transform is not None:
             return self.dim_transform(vector)
         return vector
@@ -1424,4 +1514,3 @@ class DualFAISSRetriever:
                 self.save_embedding_cache()
         except Exception as e:
             logger.warning(f"Error during __del__ saving embedding cache: {type(e).__name__}: {e}")
-

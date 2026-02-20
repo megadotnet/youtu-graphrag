@@ -146,9 +146,11 @@ youtu-graphrag/
 │   └── └── faiss_filter.py           # DualFAISSRetriever - FAISS retrieval
 │
 ├── 📁 utils/                      # Utility Modules
-│   ├── tree_comm.py              # community detection algorithm
+│   ├── tree_comm.py              # Community detection algorithm
 │   ├── call_llm_api.py           # LLM API calling
 │   ├── eval.py                   # Evaluation tools
+│   ├── logger.py                 # Logger utility
+│   ├── document_parser.py        # Document parser
 │   └── graph_processor.py        # Graph processing tools
 │
 ├── 📁 schemas/                   # Dataset Schemas
@@ -162,6 +164,7 @@ youtu-graphrag/
 ├── 📁 retriever/                 # Retrieval Cache
 │
 ├── main.py                       # 🎯 Main program entry
+├── backend.py                    # FastAPI backend
 ├── requirements.txt              # Dependencies list
 ├── setup_env.sh                  # install web dependency
 ├── start.sh                      # start web service
